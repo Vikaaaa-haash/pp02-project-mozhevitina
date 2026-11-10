@@ -24,7 +24,7 @@ def calculate_price(product_name, base_price):
         cursor.execute("""
             SELECT COUNT(*) 
             FROM order_items oi 
-            JOIN orders o ON oi.order_id = o.id 
+            JOIN orders o ON oi.order_id = o.order_id 
             WHERE oi.product_name = %s 
               AND o.order_date >= CURRENT_DATE - INTERVAL '1 month'
         """, (product_name,))

@@ -49,9 +49,12 @@ def create_card(product):
     except (ValueError, TypeError):
         discount_percent = 0
 
-    # Считаем новую цену на основе скидки из БД
+    # Считаем новую цену на основе скидки из БД 
     old_price = float(price)
-    new_price = old_price * DISCOUNT_RATE
+    if discount_percent > 0:
+        new_price = old_price - (old_price * discount_percent / 100)
+    else:
+        new_price = old_price
 
     # Картинка
     if image_name and str(image_name).strip() != "":
