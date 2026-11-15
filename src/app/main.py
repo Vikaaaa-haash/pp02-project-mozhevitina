@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, 
     QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QPushButton, QMessageBox, QComboBox, QLineEdit
 )
+from PySide6.QtWidgets import QStackedWidget
 from PySide6.QtWidgets import QSizePolicy
 from PySide6.QtCore import QPropertyAnimation
 from PySide6.QtWidgets import QGraphicsOpacityEffect
@@ -285,6 +286,10 @@ class MainWindow(QMainWindow):
         self.logout_button = QPushButton("Выход")
         self.logout_button.setStyleSheet("background-color: #FF8080; color: white; font-weight: bold; padding: 5px 15px;")
         self.logout_button.clicked.connect(self.logout)
+        self.back_button = QPushButton("Назад")
+        self.back_button.setStyleSheet("background-color: #FFB347; color: white; font-weight: bold; padding: 5px 15px;")
+        self.back_button.clicked.connect(lambda: self.switch_page(1))
+        top_layout.addWidget(self.back_button)
         top_layout.addWidget(self.logout_button)
         
         main_layout.addWidget(header_widget)
@@ -312,7 +317,7 @@ class MainWindow(QMainWindow):
         self.sort_combo.currentIndexChanged.connect(self.load_products)
         filter_layout.addWidget(self.sort_combo, 1)
 
-        # Фильтр по производителю (ДЗ)
+        # Фильтр по производителю 
         self.prod_combo = QComboBox()
         self.prod_combo.addItem("Все производители")
         productions = self.db.get_productions()
@@ -323,7 +328,16 @@ class MainWindow(QMainWindow):
         # Добавляем всю панель в главный слой
         main_layout.addLayout(filter_layout)
 
-        # --- КАТАЛОГ (С СОРТИРОВКОЙ ПО СКИДКЕ) ---
+        # --- НАВИГАЦИЯ (QStackedWidget) ---
+        self.stacked_widget = QStackedWidget()
+        self.stacked_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # Страница 0: Каталог
+        self.catalog_page = QWidget()
+        catalog_page_layout = QVBoxLayout()
+        catalog_page_layout.setContentsMargins(0, 0, 0, 0)
+        
+        #  старый каталог 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         catalog_container = QWidget()
@@ -331,25 +345,24 @@ class MainWindow(QMainWindow):
         self.catalog_layout.setSpacing(10) 
         self.catalog_layout.setAlignment(Qt.AlignTop)
         catalog_container.setLayout(self.catalog_layout) 
-
-        products = self.db.get_products()
-        
-        # Сортируем по размеру скидки (по убыванию), чтобы самые выгодные были сверху
-        def get_discount(p):
-            try:
-                return int(p[10]) if len(p) > 10 and p[10] is not None else 0
-            except:
-                return 0
-                
         self.scroll.setWidget(catalog_container)
-        main_layout.addWidget(self.scroll)
         
-        self.setStyleSheet("""
-            QMainWindow { background-color: #FFFFFF; }
-            QScrollArea { border: none; background-color: #FFFFFF; }
-            QWidget { background-color: #FFFFFF; }
-            QLabel { border: none; }
-        """)
+        catalog_page_layout.addWidget(self.scroll)
+        self.catalog_page.setLayout(catalog_page_layout)
+        self.stacked_widget.addWidget(self.catalog_page) # Индекс 0
+
+        # Страница 1: Заказы
+        self.orders_page = QWidget()
+        orders_layout = QVBoxLayout()
+        orders_layout.addWidget(QLabel("Страница заказов (в разработке)"))
+        self.orders_page.setLayout(orders_layout)
+        self.stacked_widget.addWidget(self.orders_page) # Индекс 1
+
+        # Добавляем QStackedWidget в главный слой
+        main_layout.addWidget(self.stacked_widget)
+        
+        # Говорим главному слою, что каталог должен занимать всё место
+        main_layout.setStretchFactor(self.stacked_widget, 1)
 
         self.load_products()
 
@@ -413,10 +426,23 @@ class MainWindow(QMainWindow):
         )
         
         if reply == QMessageBox.Yes:
-            from app.login_window import LoginWindow
+            from login_window import LoginWindow
             self.login_window = LoginWindow(self.db)
             self.login_window.show()
             self.close()
+
+    def go_back(self):
+        current_index = self.stacked_widget.currentIndex()
+        if current_index > 0:
+            self.switch_page(current_index - 1)
+
+    def switch_page(self, index):
+        self.stacked_widget.setCurrentIndex(index)
+        if index == 0:
+            self.setWindowTitle("Ювелирный — Каталог")
+        elif index == 1:
+            self.setWindowTitle("Ювелирный — Заказы")
+
 
     def closeEvent(self, event):
         if self.db:
