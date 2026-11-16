@@ -60,8 +60,14 @@ class LoginWindow(QWidget):
     def check_login(self):
         login = self.login_input.text().strip()
         
+        # Проверка на пустоту
         if not login:
-            QMessageBox.warning(self, "Ошибка", "Введите логин")
+            QMessageBox.warning(self, "Ошибка", "Введите логин (пробелы не считаются)")
+            return
+            
+        # Проверка длины (минимум 3 символа)
+        if len(login) < 3:
+            QMessageBox.warning(self, "Ошибка", "Логин должен содержать минимум 3 символа")
             return
 
         conn = self.db.get_connection()
@@ -83,7 +89,7 @@ class LoginWindow(QWidget):
             return
 
         if result is None:
-            QMessageBox.warning(self, "Ошибка", "Неверный логин")
+            QMessageBox.critical(self, "Ошибка", "Пользователь не найден")
         else:
             self.user_id = result[0]
             self.role_id = result[1] 
