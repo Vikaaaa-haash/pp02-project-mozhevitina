@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, 
     QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QPushButton, QMessageBox, QComboBox, QLineEdit
 )
+from PySide6.QtWidgets import QDialog, QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView
 from PySide6.QtWidgets import QStackedWidget
 from PySide6.QtWidgets import QSizePolicy
 from PySide6.QtCore import QPropertyAnimation
@@ -27,7 +28,7 @@ logging.basicConfig(
 )
 
 
-def create_card(product):
+def create_card(product, main_window):
     p_id = product[0]
     category = product[1]
     subcategory = product[2]
@@ -201,8 +202,43 @@ def create_card(product):
         card.setEnabled(False)
         card.setStyleSheet(card.styleSheet() + " opacity: 0.7;") 
 
+    # Клик по карточке открывает диалог
+    card.mousePressEvent = lambda event: main_window.open_product_dialog(product)
+
     return card
 
+
+class ProductDialog(QDialog):
+    def __init__(self, product, parent=None):
+        super().__init__(parent)
+        self.product = product
+        self.setWindowTitle(f"Карточка товара — {product[4]}")
+        self.resize(400, 300)
+        
+        layout = QVBoxLayout()
+        
+        # Информация о товаре
+        layout.addWidget(QLabel(f"<b>{product[4]}</b>"))
+        layout.addWidget(QLabel(f"Категория: {product[1]}"))
+        layout.addWidget(QLabel(f"Состав: {product[7]}"))
+        layout.addWidget(QLabel(f"Цена: {product[8]} ₽"))
+        layout.addWidget(QLabel(f"В наличии: {product[9]} шт."))
+        
+        # Выбор количества
+        layout.addWidget(QLabel("Количество:"))
+        self.qty_spin = QSpinBox()
+        self.qty_spin.setRange(1, int(product[9]) if product[9] > 0 else 1)
+        layout.addWidget(self.qty_spin)
+        
+        # Кнопка "Добавить в корзину"
+        self.add_btn = QPushButton("Добавить в корзину")
+        self.add_btn.clicked.connect(self.accept)
+        layout.addWidget(self.add_btn)
+        
+        self.setLayout(layout)
+
+    def get_data(self):
+        return self.qty_spin.value()
 
 class MainWindow(QMainWindow):
     def __init__(self, role_id=None, full_name=None):
@@ -262,6 +298,11 @@ class MainWindow(QMainWindow):
         self.order_button = QPushButton("Оформить заказ")
         self.manager_button = QPushButton("Заказы (менеджер)")
         self.admin_button = QPushButton("Админ-панель")
+        
+        # Привязка кнопок к действиям
+        self.order_button.clicked.connect(lambda: self.switch_page(3))  # Оформить заказ -> Корзина
+        self.manager_button.clicked.connect(lambda: self.switch_page(1)) # Заказы -> Страница заказов
+        self.admin_button.clicked.connect(lambda: self.switch_page(1))   # Админ-панель -> Туда же
 
         for btn in [self.order_button, self.manager_button, self.admin_button]:
             btn.setStyleSheet("""
@@ -288,7 +329,7 @@ class MainWindow(QMainWindow):
         self.logout_button.clicked.connect(self.logout)
         self.back_button = QPushButton("Назад")
         self.back_button.setStyleSheet("background-color: #FFB347; color: white; font-weight: bold; padding: 5px 15px;")
-        self.back_button.clicked.connect(lambda: self.switch_page(1))
+        self.back_button.clicked.connect(self.go_back)
         top_layout.addWidget(self.back_button)
         top_layout.addWidget(self.logout_button)
         
@@ -351,12 +392,31 @@ class MainWindow(QMainWindow):
         self.catalog_page.setLayout(catalog_page_layout)
         self.stacked_widget.addWidget(self.catalog_page) # Индекс 0
 
-        # Страница 1: Заказы
+        # Страница 1: Заказы (таблица)
         self.orders_page = QWidget()
         orders_layout = QVBoxLayout()
-        orders_layout.addWidget(QLabel("Страница заказов (в разработке)"))
+        self.orders_table = QTableWidget()
+        self.orders_table.setColumnCount(4)
+        self.orders_table.setHorizontalHeaderLabels(["Номер", "Дата", "Клиент", "Сумма"])
+        orders_layout.addWidget(self.orders_table)
         self.orders_page.setLayout(orders_layout)
         self.stacked_widget.addWidget(self.orders_page) # Индекс 1
+
+
+        # Страница 3: Корзина
+        self.cart_page = QWidget()
+        cart_layout = QVBoxLayout()
+        self.cart_table = QTableWidget()
+        self.cart_table.setColumnCount(4)
+        self.cart_table.setHorizontalHeaderLabels(["Товар", "Кол-во", "Цена", "Сумма"])
+        cart_layout.addWidget(self.cart_table)
+        
+        self.checkout_btn = QPushButton("Оформить заказ")
+        self.checkout_btn.clicked.connect(self.checkout)
+        cart_layout.addWidget(self.checkout_btn)
+        
+        self.cart_page.setLayout(cart_layout)
+        self.stacked_widget.addWidget(self.cart_page) # Индекс 3
 
         # Добавляем QStackedWidget в главный слой
         main_layout.addWidget(self.stacked_widget)
@@ -365,6 +425,8 @@ class MainWindow(QMainWindow):
         main_layout.setStretchFactor(self.stacked_widget, 1)
 
         self.load_products()
+
+        self.load_orders() # Загружаем заказы в таблицу
 
     def setup_role_interface(self):
         self.order_button.hide()
@@ -414,7 +476,7 @@ class MainWindow(QMainWindow):
                 
         # 5. Рисуем только уникальные карточки
         for product in unique_products:
-            card = create_card(product)
+            card = create_card(product, self)
             self.catalog_layout.addWidget(card)
             
         self.catalog_layout.addStretch()
@@ -431,10 +493,73 @@ class MainWindow(QMainWindow):
             self.login_window.show()
             self.close()
 
+    def load_orders(self):
+        try:
+            conn = self.db.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT order_id, order_date, user_id, order_id FROM orders")
+            orders = cursor.fetchall()
+            self.orders_table.setRowCount(len(orders))
+            for row, order in enumerate(orders):
+                self.orders_table.setItem(row, 0, QTableWidgetItem(str(order[0])))
+                self.orders_table.setItem(row, 1, QTableWidgetItem(str(order[1])))
+                self.orders_table.setItem(row, 2, QTableWidgetItem(str(order[2])))
+                self.orders_table.setItem(row, 3, QTableWidgetItem(str(order[3])))
+            cursor.close()
+            self.db.release_connection(conn)
+        except Exception as e:
+            print(f"Ошибка загрузки заказов: {e}")
+
+    def open_product_dialog(self, product):
+            dialog = ProductDialog(product, self)
+            if dialog.exec():
+              qty = dialog.get_data()
+              self.add_to_cart(product, qty)
+
+    def add_to_cart(self, product, qty):
+        # Добавляем товар в таблицу корзины
+        row = self.cart_table.rowCount()
+        self.cart_table.insertRow(row)
+        self.cart_table.setItem(row, 0, QTableWidgetItem(product[4]))
+        self.cart_table.setItem(row, 1, QTableWidgetItem(str(qty)))
+        self.cart_table.setItem(row, 2, QTableWidgetItem(str(product[8])))
+        self.cart_table.setItem(row, 3, QTableWidgetItem(str(int(product[8]) * qty)))
+        
+        # Переключаемся на корзину
+        self.switch_page(3)
+
+    def checkout(self):
+        if self.cart_table.rowCount() == 0:
+            QMessageBox.warning(self, "Ошибка", "Корзина пуста")
+            return
+        
+        # Сохраняем заказ в БД 
+        try:
+            conn = self.db.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO orders (order_date, user_id) VALUES (CURRENT_DATE, 1) RETURNING order_id")
+            order_id = cursor.fetchone()[0]
+            
+            for row in range(self.cart_table.rowCount()):
+                name = self.cart_table.item(row, 0).text()
+                qty = int(self.cart_table.item(row, 1).text())
+                price = float(self.cart_table.item(row, 2).text())
+                cursor.execute("INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (%s, (SELECT id FROM products WHERE name = %s LIMIT 1), %s, %s)", (order_id, name, qty, price))
+            
+            conn.commit()
+            cursor.close()
+            self.db.release_connection(conn)
+            
+            QMessageBox.information(self, "Успех", "Заказ оформлен!")
+            self.cart_table.setRowCount(0)
+            self.switch_page(0)
+            self.load_products()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка оформления: {e}")        
+
     def go_back(self):
-        current_index = self.stacked_widget.currentIndex()
-        if current_index > 0:
-            self.switch_page(current_index - 1)
+        # Всегда возвращаемся в каталог (индекс 0)
+        self.switch_page(0)
 
     def switch_page(self, index):
         self.stacked_widget.setCurrentIndex(index)
